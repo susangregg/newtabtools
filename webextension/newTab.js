@@ -825,14 +825,7 @@ var newTabTools = {
 		}
 
 		if (this.optionsFilterHostAutocomplete.childElementCount === 0) {
-			let {version} = await browser.runtime.getBrowserInfo();
-			let options;
-			if (compareVersions(version, '63.0a1') >= 0) {
-				options = { limit:100, onePerDomain: false, includeBlocked: true };
-			} else {
-				options = { providers: ['places'] };
-			}
-			chrome.topSites.get(options, sites => {
+			chrome.topSites.get(sites => {
 				for (let s of sites.reduce((carry, site) => {
 					let {protocol, host} = new URL(site.url);
 					if (host && ['http:', 'https:', 'ftp:'].includes(protocol) && !carry.includes(host)) {
@@ -866,7 +859,17 @@ var newTabTools = {
 			n.parentNode.insertBefore(document.createTextNode(newTabTools.getString(n.dataset.label)), n.nextSibling);
 		});
 
-		Prefs.init().then(() => {
+		Promise.all([
+			Prefs.init(),
+			initDB()
+		]).then(function() {
+			if (initDB.waitingQueue) {
+				for (let waitingResolve of initDB.waitingQueue) {
+					waitingResolve.call();
+				}
+				delete initDB.waitingQueue;
+			}
+		}).then(() => {
 			// Everything is loaded. Initialize the New Tab Page.
 			Page.init();
 			newTabTools.updateUI();
@@ -895,29 +898,6 @@ var newTabTools = {
 		}).catch(console.error);
 	},
 	getThumbnails: function() {
-		chrome.runtime.sendMessage({
-			name: 'Thumbnails.get',
-			urls: Grid.sites.filter(s => s && !s.thumbnail.style.backgroundImage).map(s => s.link.url)
-		}, function(thumbs) {
-			Grid.sites.forEach(s => {
-				if (!s) {
-					return;
-				}
-				let link = s.link;
-				if (!link.image) {
-					let thumb = thumbs.get(link.url);
-					if (thumb) {
-						let css = 'url(' + URL.createObjectURL(thumb) + ')';
-						s.thumbnail.style.backgroundImage = css;
-
-						if (newTabTools.selectedSite == s) {
-							newTabTools.siteThumbnail.style.backgroundImage = css;
-							newTabTools.saveCurrentThumbButton.disabled = false;
-						}
-					}
-				}
-			});
-		});
 	}
 };
 
@@ -1014,8 +994,6 @@ var newTabTools = {
 	newTabTools.optionsFilterHost.oninput = newTabTools.optionsFilterCount.oninput = function() {
 		newTabTools.optionsFilterSet.disabled = !newTabTools.optionsFilterHost.checkValidity() || !newTabTools.optionsFilterCount.checkValidity();
 	};
-	document.body.oncontextmenu = newTabTools.contextMenuShowing;
-	newTabTools.contextMenu.onclick = newTabTools.contextMenuOnClick;
 
 	window.addEventListener('keydown', function(event) {
 		if (event.key == 'Escape') {
